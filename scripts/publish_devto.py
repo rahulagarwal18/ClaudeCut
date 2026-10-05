@@ -1,5 +1,5 @@
 """
-Automated Publisher for DEV.to Articles.
+Automated Publisher for ClaudeCut DEV.to Article.
 Usage:
     python scripts/publish_devto.py <DEVTO_API_KEY> [--draft]
 """
@@ -11,9 +11,8 @@ import httpx
 DEVTO_API_URL = "https://dev.to/api/articles"
 ARTICLE_PATH = os.path.join(os.path.dirname(__file__), "..", "docs", "DEV_TO_POST.md")
 
-def publish(api_key: str, article_path: str = None, is_draft: bool = False):
-    target_path = article_path or ARTICLE_PATH
-    with open(target_path, "r", encoding="utf-8") as f:
+def publish(api_key: str, is_draft: bool = False):
+    with open(ARTICLE_PATH, "r", encoding="utf-8") as f:
         content = f.read()
 
     headers = {
@@ -31,7 +30,7 @@ def publish(api_key: str, article_path: str = None, is_draft: bool = False):
         }
     }
 
-    print("[INFO] Publishing article to DEV.to...")
+    print("[INFO] Publishing ClaudeCut article to DEV.to...")
     resp = httpx.post(DEVTO_API_URL, headers=headers, json=payload, timeout=30.0)
 
     if resp.status_code in [200, 201]:
@@ -44,15 +43,13 @@ def publish(api_key: str, article_path: str = None, is_draft: bool = False):
         return None
 
 if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser(description="Publish Markdown post to DEV.to")
-    parser.add_argument("api_key", nargs="?", default=os.environ.get("DEVTO_API_KEY"), help="DEV.to API Key")
-    parser.add_argument("--file", "-f", default=ARTICLE_PATH, help="Path to markdown article")
-    parser.add_argument("--draft", action="store_true", help="Publish as draft")
+    if len(sys.argv) < 2:
+        api_key = os.environ.get("DEVTO_API_KEY")
+        if not api_key:
+            print("Usage: python scripts/publish_devto.py <DEVTO_API_KEY> [--draft]")
+            sys.exit(1)
+    else:
+        api_key = sys.argv[1]
 
-    args = parser.parse_args()
-    if not args.api_key:
-        print("Usage: python scripts/publish_devto.py <DEVTO_API_KEY> [--file path/to/article.md] [--draft]")
-        sys.exit(1)
-
-    publish(args.api_key, article_path=args.file, is_draft=args.draft)
+    is_draft = "--draft" in sys.argv
+    publish(api_key, is_draft=is_draft)
