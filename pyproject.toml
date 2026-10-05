@@ -5,11 +5,25 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "claudecut"
 version = "1.0.0"
-description = "Open-source intelligent proxy that reduces Anthropic Claude API & Claude Code expenses by 40%+ through automated prompt caching, context minification, and smart model routing."
+description = "Drop-in intelligent reverse proxy that automatically slashes Anthropic Claude API & Claude Code expenses by 40% to 70% with automatic prompt caching and task-based model switching."
 readme = "README.md"
-authors = [{ name = "ClaudeCut Open Source Community" }]
-license = { text = "MIT" }
+authors = [{ name = "Rahul Agarwal", email = "rahul@example.com" }]
+license = { text = "Source-Available License" }
 requires-python = ">=3.10"
+keywords = [
+    "anthropic",
+    "claude",
+    "claude-code",
+    "claude-3-7-sonnet",
+    "claude-3-5-haiku",
+    "prompt-caching",
+    "cost-optimization",
+    "llm-proxy",
+    "ai-gateway",
+    "finops",
+    "cursor-ai",
+    "token-optimizer"
+]
 dependencies = [
     "fastapi>=0.110.0",
     "uvicorn[standard]>=0.28.0",
@@ -26,5 +40,6 @@ dependencies = [
 claudecut = "claudecut.cli:main"
 
 [project.urls]
-"Homepage" = "https://github.com/open-claudecut/claudecut"
-"Bug Tracker" = "https://github.com/open-claudecut/claudecut/issues"
+"Homepage" = "https://github.com/rahulagarwal18/ClaudeCut"
+"Repository" = "https://github.com/rahulagarwal18/ClaudeCut"
+"Bug Tracker" = "https://github.com/rahulagarwal18/ClaudeCut/issues"

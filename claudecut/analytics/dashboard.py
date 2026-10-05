@@ -29,7 +29,7 @@ DASHBOARD_HTML = """
                 <p class="text-sm text-slate-400 mt-1">Automated Prompt Cache Injection + Dynamic Task-Based Model Switching</p>
             </div>
             <div class="flex items-center gap-3">
-                <a href="https://github.com/open-claudecut/claudecut" target="_blank" class="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs px-3 py-2 rounded-lg transition">GitHub Repo</a>
+                <a href="https://github.com/rahulagarwal18/ClaudeCut" target="_blank" class="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs px-3 py-2 rounded-lg transition">⭐ Star on GitHub</a>
                 <button onclick="fetchStats()" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-3 py-2 rounded-lg font-medium transition">↻ Refresh</button>
             </div>
         </div>

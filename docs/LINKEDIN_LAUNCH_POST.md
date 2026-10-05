@@ -41,7 +41,7 @@ Tested on a standard 10-turn agentic coding session:
 ---
 
 🔗 **GitHub Repository & Full Technical Specs:**
-[Insert your GitHub link here]
+https://github.com/rahulagarwal18/ClaudeCut
 
 🛡️ *Note on Licensing:* The code is Source-Available for personal evaluation & research. For enterprise deployments, agency usage, or commercial licensing, feel free to DM me directly!
 
