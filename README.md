@@ -1,6 +1,8 @@
-# ✂️ ClaudeCut — The Intelligent Anthropic Claude Cost Optimizer
-
 <div align="center">
+
+![ClaudeCut Hero Banner](assets/hero_banner.jpg)
+
+<br/>
 
 [![GitHub Stars](https://img.shields.io/github/stars/rahulagarwal18/ClaudeCut?style=social)](https://github.com/rahulagarwal18/ClaudeCut/stargazers)
 [![License: Source-Available](https://img.shields.io/badge/License-Source--Available-emerald.svg)](LICENSE)
@@ -28,6 +30,12 @@ Even though Anthropic offers **Prompt Caching** (giving a massive **90% discount
 ---
 
 ## 💡 The Solution: ClaudeCut
+
+<div align="center">
+
+![ClaudeCut Architecture Diagram](assets/architecture_diagram.jpg)
+
+</div>
 
 **ClaudeCut** is a lightweight, high-performance local proxy that sits seamlessly between your IDE / CLI and Anthropic:
 
