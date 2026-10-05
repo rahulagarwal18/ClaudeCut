@@ -21,7 +21,6 @@ def publish(api_key: str, is_draft: bool = False):
         "User-Agent": "ClaudeCut-Publisher/1.0"
     }
 
-    # If draft requested, replace published: true with published: false
     if is_draft:
         content = content.replace("published: true", "published: false")
 
@@ -31,15 +30,17 @@ def publish(api_key: str, is_draft: bool = False):
         }
     }
 
-    print(f"🚀 Publishing article to DEV.to...")
+    print("[INFO] Publishing article to DEV.to...")
     resp = httpx.post(DEVTO_API_URL, headers=headers, json=payload, timeout=30.0)
 
     if resp.status_code in [200, 201]:
         data = resp.json()
-        print(f"✅ Success! Your article is live at:")
-        print(f"👉 {data.get('url')}")
+        print("[SUCCESS] Your article is live at:")
+        print(f"URL: {data.get('url')}")
+        return data.get('url')
     else:
-        print(f"❌ Failed ({resp.status_code}): {resp.text}")
+        print(f"[ERROR] Failed ({resp.status_code}): {resp.text}")
+        return None
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
