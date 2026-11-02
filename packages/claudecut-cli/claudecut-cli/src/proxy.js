@@ -1,17 +1,18 @@
 const http = require('http');
 const https = require('https');
 const { URL } = require('url');
-const { compressToolResult } = require('./large-repo/outputCompressor');
-const { pruneIdleHistory } = require('./large-repo/historyWindow');
+const { LocalPersistentState } = require('./memory-engine/persistentState');
+const { distillMessages } = require('./memory-engine/contextDistiller');
 
 class ClaudeCutProxy {
   constructor(options = {}) {
     this.port = options.port || 9876;
     this.upstream = options.upstream || 'https://api.anthropic.com';
     this.server = null;
+    this.state = new LocalPersistentState();
     this.stats = {
       totalRequests: 0,
-      tokensSavedEstimate: 0
+      totalPayloadSizeCut: 0
     };
   }
 
@@ -37,75 +38,45 @@ class ClaudeCutProxy {
       }
     }
 
-    // 2. LARGE REPO ENGINE: Compress Giant Tool Outputs & Prune Idle History
+    // 2. TOKEN FIREWALL & LOCAL MEMORY WINDOW
+    // Caps massive tool outputs and keeps messages strictly capped to a 4-turn distilled window
     if (Array.isArray(payload.messages)) {
-      // Prune idle historical turns older than 4 turns back
-      payload.messages = pruneIdleHistory(payload.messages);
-
-      payload.messages.forEach(msg => {
-        if (typeof msg.content === 'string') {
-          msg.content = this.pruneContent(msg.content);
-        } else if (Array.isArray(msg.content)) {
-          msg.content.forEach(b => {
-            if (b && b.text) {
-              b.text = this.pruneContent(b.text);
-            }
-            // If it's a tool result (e.g. huge git diff or file read)
-            if (b && b.type === 'tool_result' && typeof b.content === 'string') {
-              b.content = compressToolResult(this.pruneContent(b.content));
-            }
-          });
-        }
-      });
+      payload.messages = distillMessages(payload.messages, this.state);
     }
 
-    // 3. Ephemeral Prompt Caching Checkpoints (90% discount on cache reads)
-    let breakpoints = 0;
+    // 3. Ephemeral Prompt Caching Checkpoints (90% off)
     const EPHEMERAL = { type: 'ephemeral' };
 
-    // Breakpoint 1: System prompt
+    // Breakpoint on System Prompt
     if (payload.system) {
       if (typeof payload.system === 'string' && payload.system.length > 500) {
         payload.system = [{ type: 'text', text: payload.system, cache_control: EPHEMERAL }];
-        breakpoints++;
       } else if (Array.isArray(payload.system) && payload.system.length > 0) {
         const last = payload.system[payload.system.length - 1];
         if (last && typeof last === 'object' && !last.cache_control) {
           last.cache_control = EPHEMERAL;
-          breakpoints++;
         }
       }
     }
 
-    // Breakpoint 2: Tool schemas
-    if (breakpoints < 4 && Array.isArray(payload.tools) && payload.tools.length > 0) {
+    // Breakpoint on Tool Schemas
+    if (Array.isArray(payload.tools) && payload.tools.length > 0) {
       const lastTool = payload.tools[payload.tools.length - 1];
       if (lastTool && typeof lastTool === 'object' && !lastTool.cache_control) {
         lastTool.cache_control = EPHEMERAL;
-        breakpoints++;
       }
     }
 
-    // Breakpoints 3 & 4: Conversation History Turns
-    if (breakpoints < 4 && Array.isArray(payload.messages) && payload.messages.length >= 3) {
-      const targetIndices = [payload.messages.length - 2];
-      if (payload.messages.length >= 5 && breakpoints < 3) {
-        targetIndices.unshift(payload.messages.length - 4);
-      }
-
-      for (const idx of targetIndices) {
-        if (breakpoints >= 4) break;
-        const msg = payload.messages[idx];
-        if (!msg) continue;
-
-        if (typeof msg.content === 'string') {
-          msg.content = [{ type: 'text', text: msg.content, cache_control: EPHEMERAL }];
-          breakpoints++;
-        } else if (Array.isArray(msg.content) && msg.content.length > 0) {
-          const lastBlock = msg.content[msg.content.length - 1];
+    // Breakpoint on the last conversation turn
+    if (Array.isArray(payload.messages) && payload.messages.length >= 2) {
+      const targetMsg = payload.messages[payload.messages.length - 2];
+      if (targetMsg) {
+        if (typeof targetMsg.content === 'string') {
+          targetMsg.content = [{ type: 'text', text: targetMsg.content, cache_control: EPHEMERAL }];
+        } else if (Array.isArray(targetMsg.content) && targetMsg.content.length > 0) {
+          const lastBlock = targetMsg.content[targetMsg.content.length - 1];
           if (lastBlock && typeof lastBlock === 'object' && !lastBlock.cache_control) {
             lastBlock.cache_control = EPHEMERAL;
-            breakpoints++;
           }
         }
       }
@@ -127,13 +98,15 @@ class ClaudeCutProxy {
 
           if (req.method === 'POST' && req.url.includes('/v1/messages')) {
             try {
+              const originalLen = reqBody.length;
               let parsed = JSON.parse(reqBody.toString('utf8'));
               parsed = this.optimizePayload(parsed);
               reqBody = Buffer.from(JSON.stringify(parsed), 'utf8');
               isJson = true;
               this.stats.totalRequests++;
+              this.stats.totalPayloadSizeCut += Math.max(0, originalLen - reqBody.length);
             } catch (err) {
-              // pass through unmodified
+              // pass through unmodified on parse error
             }
           }
 
@@ -163,7 +136,7 @@ class ClaudeCutProxy {
           proxyReq.on('error', err => {
             if (!res.headersSent) {
               res.writeHead(502, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({ error: 'Proxy error', details: err.message }));
+              res.end(JSON.stringify({ error: 'ClaudeCut Proxy Error', details: err.message }));
             }
           });
 
