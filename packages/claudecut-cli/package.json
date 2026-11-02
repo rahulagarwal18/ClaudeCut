@@ -1,0 +1,28 @@
+{
+  "name": "claudecut",
+  "version": "1.0.0",
+  "description": "Zero-setup optimizer and smart wrapper for Claude Code on large codebases. Prevents context bloat, automates compacting, cleans idle context, and enables prompt caching via npx.",
+  "main": "src/index.js",
+  "bin": {
+    "claudecut": "bin/claudecut.js"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "anthropic",
+    "context-optimization",
+    "npx",
+    "cli",
+    "token-optimizer",
+    "llm-cache"
+  ],
+  "author": "Rahul Agarwal",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rahulagarwal18/ClaudeCut.git"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
