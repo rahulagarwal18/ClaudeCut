@@ -77,9 +77,10 @@ Examples:
 
   console.log(`\x1b[90mLaunching Claude Code...\x1b[0m\n`);
 
-  // Detect shell executable on Windows vs Unix
-  const isWin = process.platform === 'win32';
-  const claudeCmd = isWin ? 'claude.cmd' : 'claude';
+  // Detect executable command
+  // On Windows, claude can be installed as claude.exe (winget/native) or claude.cmd (npm global)
+  // Invoking 'claude' directly inside shell: true lets Windows resolve .exe, .cmd, or .bat automatically
+  const claudeCmd = 'claude';
 
   // Spawn claude with user arguments and stdio inheritance
   const child = spawn(claudeCmd, args, {

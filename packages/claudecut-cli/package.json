@@ -1,6 +1,6 @@
 {
   "name": "claudecut",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Zero-setup optimizer and smart wrapper for Claude Code on large codebases. Prevents context bloat, automates compacting, cleans idle context, and enables prompt caching via npx.",
   "main": "src/index.js",
   "bin": {
