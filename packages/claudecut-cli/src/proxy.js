@@ -1,6 +1,8 @@
 const http = require('http');
 const https = require('https');
 const { URL } = require('url');
+const { compressToolResult } = require('./large-repo/outputCompressor');
+const { pruneIdleHistory } = require('./large-repo/historyWindow');
 
 class ClaudeCutProxy {
   constructor(options = {}) {
@@ -9,18 +11,14 @@ class ClaudeCutProxy {
     this.server = null;
     this.stats = {
       totalRequests: 0,
-      cachedReads: 0,
-      savedTokensEstimate: 0
+      tokensSavedEstimate: 0
     };
   }
 
   pruneContent(text) {
     if (typeof text !== 'string') return text;
-    // Strip trailing whitespaces per line
     let pruned = text.replace(/[ \t]+$/gm, '');
-    // Collapse excessive consecutive blank lines down to 2
     pruned = pruned.replace(/\n{3,}/g, '\n\n');
-    // Collapse massive delimiter bars (e.g. 50+ dashes to 10)
     pruned = pruned.replace(/([=\-\*\_~#]){15,}/g, '$1$1$1$1$1$1$1$1$1$1');
     return pruned;
   }
@@ -28,7 +26,7 @@ class ClaudeCutProxy {
   optimizePayload(payload) {
     if (!payload || typeof payload !== 'object') return payload;
 
-    // 1. Minify Context
+    // 1. Minify whitespace in system prompt
     if (payload.system) {
       if (typeof payload.system === 'string') {
         payload.system = this.pruneContent(payload.system);
@@ -39,19 +37,29 @@ class ClaudeCutProxy {
       }
     }
 
+    // 2. LARGE REPO ENGINE: Compress Giant Tool Outputs & Prune Idle History
     if (Array.isArray(payload.messages)) {
+      // Prune idle historical turns older than 4 turns back
+      payload.messages = pruneIdleHistory(payload.messages);
+
       payload.messages.forEach(msg => {
         if (typeof msg.content === 'string') {
           msg.content = this.pruneContent(msg.content);
         } else if (Array.isArray(msg.content)) {
           msg.content.forEach(b => {
-            if (b && b.text) b.text = this.pruneContent(b.text);
+            if (b && b.text) {
+              b.text = this.pruneContent(b.text);
+            }
+            // If it's a tool result (e.g. huge git diff or file read)
+            if (b && b.type === 'tool_result' && typeof b.content === 'string') {
+              b.content = compressToolResult(this.pruneContent(b.content));
+            }
           });
         }
       });
     }
 
-    // 2. Automated Ephemeral Prompt Caching Checkpoints (90% off)
+    // 3. Ephemeral Prompt Caching Checkpoints (90% discount on cache reads)
     let breakpoints = 0;
     const EPHEMERAL = { type: 'ephemeral' };
 
@@ -78,7 +86,7 @@ class ClaudeCutProxy {
       }
     }
 
-    // Breakpoint 3 & 4: Multi-turn history turns
+    // Breakpoints 3 & 4: Conversation History Turns
     if (breakpoints < 4 && Array.isArray(payload.messages) && payload.messages.length >= 3) {
       const targetIndices = [payload.messages.length - 2];
       if (payload.messages.length >= 5 && breakpoints < 3) {
@@ -125,7 +133,7 @@ class ClaudeCutProxy {
               isJson = true;
               this.stats.totalRequests++;
             } catch (err) {
-              // pass through unmodified if parsing fails
+              // pass through unmodified
             }
           }
 
