@@ -26,6 +26,7 @@ class ClaudeCutProxy {
   constructor(options = {}) {
     this.port = options.port ?? 9876;
     this.host = '127.0.0.1';
+    this.strictPort = !!options.strictPort;
     this.upstream = new URL(options.upstream || 'https://api.anthropic.com');
     this.mode = options.mode === 'measure' ? 'measure' : 'optimize';
     this.compression = options.compression || {};
@@ -164,7 +165,7 @@ class ClaudeCutProxy {
       const tryListen = () => {
         this.server = http.createServer((req, res) => this._handle(req, res));
         this.server.once('error', err => {
-          if (err.code === 'EADDRINUSE' && attempts < 20) { attempts++; this.port++; tryListen(); }
+          if (err.code === 'EADDRINUSE' && !this.strictPort && attempts < 20) { attempts++; this.port++; tryListen(); }
           else reject(err);
         });
         this.server.listen(this.port, this.host, () => {

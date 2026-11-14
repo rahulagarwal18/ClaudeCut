@@ -88,7 +88,9 @@ class Ledger extends EventEmitter {
     if (row.status < 400) T.compressedOutputs += row.compressed.length;
 
     if (entry.report && entry.report.context) {
-      this.lastContext = { ...entry.report.context, hogs: entry.report.hogs, model: row.model, t: row.t };
+      // realTokens: exact input size Anthropic reported, used to correct the chars/4 estimates.
+      const real = row.status < 400 ? row.input + row.cacheRead + row.cacheWrite : 0;
+      this.lastContext = { ...entry.report.context, hogs: entry.report.hogs, model: row.model, t: row.t, realTokens: real || null };
     }
 
     this.requests.push(row);

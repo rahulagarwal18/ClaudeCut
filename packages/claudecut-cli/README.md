@@ -38,6 +38,18 @@ A live dashboard opens at `http://127.0.0.1:9876/__claudecut`.
 
 Want proof before trusting it? Run `npx claudecut --measure-only`: requests pass through byte-for-byte and the dashboard only *measures*.
 
+## VS Code (Claude Code panel)
+
+In your project folder, run once:
+
+```bash
+npx claudecut vscode            # optional: --budget 5
+```
+
+Then reload VS Code (`Ctrl+Shift+P` → "Developer: Reload Window") and click **Allow** if VS Code asks about automatic tasks. From then on, ClaudeCut starts by itself whenever you open the folder, and the Claude Code panel goes through it. Dashboard: `http://127.0.0.1:9876/__claudecut`.
+
+Undo with `npx claudecut vscode --remove`.
+
 ## Big repos and monorepos
 
 ```bash

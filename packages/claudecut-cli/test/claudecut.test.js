@@ -100,6 +100,7 @@ test('end-to-end: Claude Code request through proxy succeeds and usage is record
     assert.match(await dash.text(), /ClaudeCut Live/);
     const snap = await (await fetch(url + '/__claudecut/api/snapshot')).json();
     assert.ok(snap.lastContext.hogs.length > 0);
+    assert.strictEqual(snap.lastContext.realTokens, 50 + 90000 + 2000, 'context panel uses real token count');
   } finally { proxy.stop(); api.server.close(); }
 });
 
