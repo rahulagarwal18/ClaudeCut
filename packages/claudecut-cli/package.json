@@ -1,6 +1,6 @@
 {
   "name": "claudecut",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "See and cut what Claude Code costs on big codebases: a local proxy with a live cost dashboard, safe tool-output compression, budget guard, and a big-repo context shield.",
   "main": "src/proxy.js",
   "bin": {
