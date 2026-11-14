@@ -1,190 +1,186 @@
 const http = require('http');
 const https = require('https');
+const fs = require('fs');
+const path = require('path');
 const { URL } = require('url');
-const { compressToolResult } = require('./large-repo/outputCompressor');
-const { pruneIdleHistory } = require('./large-repo/historyWindow');
+const { optimizeRequest } = require('./optimizer');
+const { UsageCollector } = require('./usage');
+const { Ledger } = require('./ledger');
+
+const DASHBOARD_HTML = path.join(__dirname, 'dashboard.html');
+const HOP_BY_HOP = ['connection', 'keep-alive', 'proxy-connection', 'transfer-encoding', 'upgrade', 'te', 'trailer', 'host', 'content-length'];
+const agents = { 'http:': new http.Agent({ keepAlive: true }), 'https:': new https.Agent({ keepAlive: true }) };
+
+function isMessagesCall(method, pathname) {
+  return method === 'POST' && /\/v1\/messages(\/count_tokens)?$/.test(pathname);
+}
 
 class ClaudeCutProxy {
+  /**
+   * options.upstream     Anthropic base URL (default https://api.anthropic.com)
+   * options.port         preferred port; the next free port is used if busy
+   * options.mode         'optimize' (default) or 'measure' (pass-through, only measures)
+   * options.budget       USD; requests are refused once the session spends this much
+   * options.compression  overrides for optimizer DEFAULTS
+   */
   constructor(options = {}) {
-    this.port = options.port || 9876;
-    this.upstream = options.upstream || 'https://api.anthropic.com';
+    this.port = options.port ?? 9876;
+    this.host = '127.0.0.1';
+    this.upstream = new URL(options.upstream || 'https://api.anthropic.com');
+    this.mode = options.mode === 'measure' ? 'measure' : 'optimize';
+    this.compression = options.compression || {};
+    this.ledger = options.ledger || new Ledger({ budget: options.budget ?? null, persist: options.persist !== false, mode: this.mode });
     this.server = null;
-    this.stats = {
-      totalRequests: 0,
-      tokensSavedEstimate: 0
-    };
+    this.sseClients = new Set();
+    this.ledger.on('update', row => this._broadcast({ type: 'request', row, snapshot: this.ledger.snapshot() }));
   }
 
-  pruneContent(text) {
-    if (typeof text !== 'string') return text;
-    let pruned = text.replace(/[ \t]+$/gm, '');
-    pruned = pruned.replace(/\n{3,}/g, '\n\n');
-    pruned = pruned.replace(/([=\-\*\_~#]){15,}/g, '$1$1$1$1$1$1$1$1$1$1');
-    return pruned;
+  get stats() { return this.ledger.totals; }
+  get url() { return `http://${this.host}:${this.port}`; }
+  get dashboardUrl() { return `${this.url}/__claudecut`; }
+
+  _broadcast(msg) {
+    const data = `data: ${JSON.stringify(msg)}\n\n`;
+    for (const res of this.sseClients) res.write(data);
   }
 
-  optimizePayload(payload) {
-    if (!payload || typeof payload !== 'object') return payload;
+  _serveDashboard(req, res, pathname) {
+    if (pathname === '/__claudecut/events') {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
+      res.write(`data: ${JSON.stringify({ type: 'snapshot', snapshot: this.ledger.snapshot() })}\n\n`);
+      this.sseClients.add(res);
+      const ping = setInterval(() => res.write(': ping\n\n'), 15000);
+      req.on('close', () => { clearInterval(ping); this.sseClients.delete(res); });
+      return;
+    }
+    if (pathname === '/__claudecut/api/snapshot') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(this.ledger.snapshot()));
+    }
+    fs.readFile(DASHBOARD_HTML, (err, html) => {
+      res.writeHead(err ? 500 : 200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end(err ? 'dashboard missing' : html);
+    });
+  }
 
-    // 1. Minify whitespace in system prompt
-    if (payload.system) {
-      if (typeof payload.system === 'string') {
-        payload.system = this.pruneContent(payload.system);
-      } else if (Array.isArray(payload.system)) {
-        payload.system.forEach(block => {
-          if (block && block.text) block.text = this.pruneContent(block.text);
-        });
+  _handle(req, res) {
+    const incoming = new URL(req.url, this.url);
+    if (incoming.pathname === '/' && req.method === 'GET') {
+      res.writeHead(302, { Location: '/__claudecut' });
+      return res.end();
+    }
+    if (incoming.pathname.startsWith('/__claudecut')) return this._serveDashboard(req, res, incoming.pathname);
+
+    const chunks = [];
+    req.on('data', c => chunks.push(c));
+    req.on('end', () => this._forward(req, res, incoming, Buffer.concat(chunks)));
+  }
+
+  _forward(req, res, incoming, body) {
+    const started = Date.now();
+    const messagesCall = isMessagesCall(req.method, incoming.pathname);
+    const isCountTokens = incoming.pathname.endsWith('/count_tokens');
+    let report = null;
+    let stream = false;
+    let requestedModel = null;
+
+    if (messagesCall) {
+      try {
+        const payload = JSON.parse(body.toString('utf8'));
+        stream = !!payload.stream;
+        requestedModel = payload.model || null;
+        if (!isCountTokens && this.ledger.overBudget()) {
+          const message = `ClaudeCut budget reached: this session spent $${this.ledger.totals.cost.toFixed(2)} of your $${this.ledger.budget} limit. Restart with a higher --budget to continue.`;
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message } }));
+          this.ledger.record({ model: requestedModel, status: 400, ms: 0, error: message, blocked: true });
+          return;
+        }
+        if (this.mode === 'optimize') {
+          report = optimizeRequest(payload, { compression: this.compression });
+          body = Buffer.from(JSON.stringify(payload), 'utf8');
+        } else {
+          // Measure-only: run the optimizer on a copy just to show what it WOULD do.
+          report = optimizeRequest(JSON.parse(JSON.stringify(payload)), { compression: this.compression });
+          report = { ...report, charsRemoved: 0, compressed: [], breakpoints: { ...report.breakpoints, added: 0, mode: 'measure-only' } };
+        }
+      } catch {
+        report = null; // not JSON: forward untouched
       }
     }
 
-    // 2. LARGE REPO ENGINE: Compress Giant Tool Outputs & Prune Idle History
-    if (Array.isArray(payload.messages)) {
-      // Prune idle historical turns older than 4 turns back
-      payload.messages = pruneIdleHistory(payload.messages);
+    const target = new URL(this.upstream.toString());
+    target.pathname = (this.upstream.pathname.replace(/\/$/, '') + incoming.pathname).replace(/\/{2,}/g, '/');
+    target.search = incoming.search;
 
-      payload.messages.forEach(msg => {
-        if (typeof msg.content === 'string') {
-          msg.content = this.pruneContent(msg.content);
-        } else if (Array.isArray(msg.content)) {
-          msg.content.forEach(b => {
-            if (b && b.text) {
-              b.text = this.pruneContent(b.text);
-            }
-            // If it's a tool result (e.g. huge git diff or file read)
-            if (b && b.type === 'tool_result' && typeof b.content === 'string') {
-              b.content = compressToolResult(this.pruneContent(b.content));
-            }
+    const headers = {};
+    for (const [k, v] of Object.entries(req.headers)) if (!HOP_BY_HOP.includes(k.toLowerCase())) headers[k] = v;
+    headers.host = target.host;
+    if (body.length) headers['content-length'] = body.length;
+    // Ask for an uncompressed body so usage can be read from the stream copy.
+    if (messagesCall) headers['accept-encoding'] = 'identity';
+
+    const lib = target.protocol === 'http:' ? http : https;
+    const upstreamReq = lib.request(target, { method: req.method, headers, agent: agents[target.protocol] }, upstreamRes => {
+      const collector = messagesCall && !isCountTokens ? new UsageCollector(upstreamRes.headers['content-type']) : null;
+      const outHeaders = { ...upstreamRes.headers };
+      delete outHeaders['content-length'];
+      delete outHeaders['transfer-encoding'];
+      delete outHeaders.connection;
+      res.writeHead(upstreamRes.statusCode, outHeaders);
+      upstreamRes.on('data', chunk => {
+        if (collector) collector.push(chunk);
+        res.write(chunk);
+      });
+      upstreamRes.on('end', () => {
+        res.end();
+        if (collector) {
+          const r = collector.finish();
+          this.ledger.record({
+            model: r.model || requestedModel, usage: r.usage, status: upstreamRes.statusCode,
+            ms: Date.now() - started, stream, error: r.error, report
           });
         }
       });
-    }
+      upstreamRes.on('error', () => res.destroy());
+    });
 
-    // 3. Ephemeral Prompt Caching Checkpoints (90% discount on cache reads)
-    let breakpoints = 0;
-    const EPHEMERAL = { type: 'ephemeral' };
+    upstreamReq.on('error', err => {
+      if (!res.headersSent) {
+        res.writeHead(502, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ type: 'error', error: { type: 'api_error', message: `ClaudeCut could not reach ${this.upstream.origin}: ${err.message}` } }));
+      } else res.destroy();
+      if (messagesCall && !isCountTokens) this.ledger.record({ model: requestedModel, status: 502, ms: Date.now() - started, error: err.message, report });
+    });
+    // Client pressed Esc / disconnected: stop the upstream request too.
+    res.on('close', () => { if (!res.writableEnded) upstreamReq.destroy(); });
 
-    // Breakpoint 1: System prompt
-    if (payload.system) {
-      if (typeof payload.system === 'string' && payload.system.length > 500) {
-        payload.system = [{ type: 'text', text: payload.system, cache_control: EPHEMERAL }];
-        breakpoints++;
-      } else if (Array.isArray(payload.system) && payload.system.length > 0) {
-        const last = payload.system[payload.system.length - 1];
-        if (last && typeof last === 'object' && !last.cache_control) {
-          last.cache_control = EPHEMERAL;
-          breakpoints++;
-        }
-      }
-    }
-
-    // Breakpoint 2: Tool schemas
-    if (breakpoints < 4 && Array.isArray(payload.tools) && payload.tools.length > 0) {
-      const lastTool = payload.tools[payload.tools.length - 1];
-      if (lastTool && typeof lastTool === 'object' && !lastTool.cache_control) {
-        lastTool.cache_control = EPHEMERAL;
-        breakpoints++;
-      }
-    }
-
-    // Breakpoints 3 & 4: Conversation History Turns
-    if (breakpoints < 4 && Array.isArray(payload.messages) && payload.messages.length >= 3) {
-      const targetIndices = [payload.messages.length - 2];
-      if (payload.messages.length >= 5 && breakpoints < 3) {
-        targetIndices.unshift(payload.messages.length - 4);
-      }
-
-      for (const idx of targetIndices) {
-        if (breakpoints >= 4) break;
-        const msg = payload.messages[idx];
-        if (!msg) continue;
-
-        if (typeof msg.content === 'string') {
-          msg.content = [{ type: 'text', text: msg.content, cache_control: EPHEMERAL }];
-          breakpoints++;
-        } else if (Array.isArray(msg.content) && msg.content.length > 0) {
-          const lastBlock = msg.content[msg.content.length - 1];
-          if (lastBlock && typeof lastBlock === 'object' && !lastBlock.cache_control) {
-            lastBlock.cache_control = EPHEMERAL;
-            breakpoints++;
-          }
-        }
-      }
-    }
-
-    return payload;
+    upstreamReq.end(body);
   }
 
   start() {
     return new Promise((resolve, reject) => {
-      this.server = http.createServer((req, res) => {
-        const upstreamUrl = new URL(req.url, this.upstream);
-
-        const chunks = [];
-        req.on('data', chunk => chunks.push(chunk));
-        req.on('end', () => {
-          let reqBody = Buffer.concat(chunks);
-          let isJson = false;
-
-          if (req.method === 'POST' && req.url.includes('/v1/messages')) {
-            try {
-              let parsed = JSON.parse(reqBody.toString('utf8'));
-              parsed = this.optimizePayload(parsed);
-              reqBody = Buffer.from(JSON.stringify(parsed), 'utf8');
-              isJson = true;
-              this.stats.totalRequests++;
-            } catch (err) {
-              // pass through unmodified
-            }
-          }
-
-          const headers = { ...req.headers };
-          delete headers.host;
-          headers['host'] = upstreamUrl.hostname;
-          if (isJson) {
-            headers['content-length'] = Buffer.byteLength(reqBody);
-            if (!headers['anthropic-beta']) {
-              headers['anthropic-beta'] = 'prompt-caching-2024-07-31';
-            }
-          }
-
-          const proxyReq = https.request(
-            upstreamUrl,
-            {
-              method: req.method,
-              headers: headers,
-              timeout: 180000
-            },
-            proxyRes => {
-              res.writeHead(proxyRes.statusCode, proxyRes.headers);
-              proxyRes.pipe(res);
-            }
-          );
-
-          proxyReq.on('error', err => {
-            if (!res.headersSent) {
-              res.writeHead(502, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({ error: 'Proxy error', details: err.message }));
-            }
-          });
-
-          if (reqBody.length > 0) {
-            proxyReq.write(reqBody);
-          }
-          proxyReq.end();
+      let attempts = 0;
+      const tryListen = () => {
+        this.server = http.createServer((req, res) => this._handle(req, res));
+        this.server.once('error', err => {
+          if (err.code === 'EADDRINUSE' && attempts < 20) { attempts++; this.port++; tryListen(); }
+          else reject(err);
         });
-      });
-
-      this.server.on('error', reject);
-      this.server.listen(this.port, '127.0.0.1', () => {
-        resolve(`http://127.0.0.1:${this.port}`);
-      });
+        this.server.listen(this.port, this.host, () => {
+          this.port = this.server.address().port;
+          resolve(this.url);
+        });
+      };
+      tryListen();
     });
   }
 
   stop() {
-    if (this.server) {
-      this.server.close();
-    }
+    for (const res of this.sseClients) res.end();
+    this.sseClients.clear();
+    if (this.server) this.server.close();
+    for (const a of Object.values(agents)) a.destroy();
   }
 }
 

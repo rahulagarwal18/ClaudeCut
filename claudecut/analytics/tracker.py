@@ -10,14 +10,22 @@ from typing import Any, Dict, Optional
 from datetime import datetime, timezone
 
 PRICING_TABLE = {
-    # Per million tokens: [input, output, cache_read, cache_write]
-    "claude-3-7-sonnet": {"input": 3.0, "output": 15.0, "cache_read": 0.30, "cache_write": 3.75},
-    "claude-3-5-sonnet": {"input": 3.0, "output": 15.0, "cache_read": 0.30, "cache_write": 3.75},
-    "claude-3-5-haiku": {"input": 0.80, "output": 4.0, "cache_read": 0.08, "cache_write": 1.0},
-    "claude-3-haiku": {"input": 0.25, "output": 1.25, "cache_read": 0.025, "cache_write": 0.30},
-    "claude-3-opus": {"input": 15.0, "output": 75.0, "cache_read": 1.50, "cache_write": 18.75},
-    "claude-opus-5": {"input": 10.0, "output": 50.0, "cache_read": 1.00, "cache_write": 12.50},
-    "default": {"input": 3.0, "output": 15.0, "cache_read": 0.30, "cache_write": 3.75}
+    # USD per million tokens (Anthropic first-party API). Matched longest-key-first.
+    "claude-fable-5-2": {"input": 8, "output": 40, "cache_read": 0.2, "cache_write": 10.0},
+    "claude-mythos-5-2": {"input": 8, "output": 40, "cache_read": 0.2, "cache_write": 10.0},
+    "claude-fable-5-1": {"input": 10, "output": 50, "cache_read": 1.0, "cache_write": 12.5},
+    "claude-fable-5": {"input": 10, "output": 50, "cache_read": 1.0, "cache_write": 12.5},
+    "claude-opus-5-5": {"input": 4, "output": 20, "cache_read": 0.2, "cache_write": 5.0},
+    "claude-opus-5": {"input": 5, "output": 25, "cache_read": 0.5, "cache_write": 6.25},
+    "claude-opus-4-8": {"input": 5, "output": 25, "cache_read": 0.5, "cache_write": 6.25},
+    "claude-opus-4-7": {"input": 5, "output": 25, "cache_read": 0.5, "cache_write": 6.25},
+    "claude-opus-4-6": {"input": 5, "output": 25, "cache_read": 0.5, "cache_write": 6.25},
+    "claude-sonnet-5-5": {"input": 2, "output": 10, "cache_read": 0.1, "cache_write": 2.5},
+    "claude-sonnet-5": {"input": 2, "output": 10, "cache_read": 0.2, "cache_write": 2.5},
+    "claude-sonnet-4-6": {"input": 3, "output": 15, "cache_read": 0.3, "cache_write": 3.75},
+    "claude-haiku-5-5": {"input": 0.1, "output": 0.5, "cache_read": 0.01, "cache_write": 0.125},
+    "claude-haiku-4-5": {"input": 1, "output": 5, "cache_read": 0.1, "cache_write": 1.25},
+    "default": {"input": 2, "output": 10, "cache_read": 0.1, "cache_write": 2.5}
 }
 
 class CostTracker:
@@ -46,7 +54,7 @@ class CostTracker:
             conn.commit()
 
     def _get_model_pricing(self, model_name: str) -> Dict[str, float]:
-        for key, rates in PRICING_TABLE.items():
+        for key, rates in sorted(PRICING_TABLE.items(), key=lambda kv: -len(kv[0])):
             if key in model_name.lower():
                 return rates
         return PRICING_TABLE["default"]

@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ClaudeCut Live</title>
+<style>
+:root {
+  color-scheme: light;
+  --surface-0: #f4f4f2; --surface-1: #fcfcfb; --border: #e3e2de;
+  --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #7a7974;
+  --grid: #ecebe7;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
+  --good: #0a7a3c; --warn: #a15c00; --bad: #c22b2b;
+  --accent: #2a78d6;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --surface-0: #111110; --surface-1: #1a1a19; --border: #2e2e2c;
+    --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8f8e86;
+    --grid: #262624;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+    --good: #3fbf6f; --warn: #e0a030; --bad: #ef6b6b;
+    --accent: #3987e5;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface-0: #111110; --surface-1: #1a1a19; --border: #2e2e2c;
+  --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8f8e86;
+  --grid: #262624;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+  --good: #3fbf6f; --warn: #e0a030; --bad: #ef6b6b;
+  --accent: #3987e5;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--surface-0); color: var(--text-primary);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+.wrap { max-width: 1180px; margin: 0 auto; padding: 20px 16px 48px; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-bottom: 16px; }
+h1 { font-size: 20px; margin: 0; }
+h2 { font-size: 15px; margin: 0 0 4px; }
+.sub { color: var(--text-secondary); font-size: 13px; }
+.pill { font-size: 12px; padding: 2px 8px; border-radius: 99px; border: 1px solid var(--border); color: var(--text-secondary); }
+.live::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--good); margin-right: 6px; }
+.off::before { background: var(--bad); }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; min-width: 0; }
+.tile .label { color: var(--text-secondary); font-size: 12px; }
+.tile .value { font-size: 26px; font-weight: 650; font-variant-numeric: tabular-nums; margin: 2px 0; }
+.tile .note { color: var(--text-muted); font-size: 12px; }
+.meter { height: 8px; border-radius: 4px; background: var(--grid); overflow: hidden; margin-top: 8px; }
+.meter > div { height: 100%; background: var(--accent); width: 0; transition: width .3s; }
+.grid2 { display: grid; grid-template-columns: 1.6fr 1fr; gap: 12px; margin-bottom: 16px; }
+@media (max-width: 860px) { .grid2 { grid-template-columns: 1fr; } }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--text-secondary); margin: 6px 0 8px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+#chart { position: relative; }
+#chart svg { display: block; width: 100%; height: 240px; }
+.tip { position: absolute; pointer-events: none; background: var(--surface-1); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 10px; font-size: 12px; box-shadow: 0 4px 16px rgba(0,0,0,.15); display: none; z-index: 2; white-space: nowrap; }
+.tip b { font-variant-numeric: tabular-nums; }
+.tip .row { display: flex; justify-content: space-between; gap: 16px; }
+.tip i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; }
+table { width: 100%; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--grid); vertical-align: top; }
+th { color: var(--text-secondary); font-weight: 600; font-size: 12px; }
+td.num, th.num { text-align: right; }
+.scroll { overflow-x: auto; }
+.mono { font-family: ui-monospace, Consolas, monospace; font-size: 12px; overflow-wrap: anywhere; }
+.bar { height: 6px; border-radius: 3px; background: var(--s1); margin-top: 4px; }
+.err { color: var(--bad); }
+.ok { color: var(--good); }
+.steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.step .n { font-size: 12px; color: var(--accent); font-weight: 650; }
+.step p { margin: 4px 0 0; color: var(--text-secondary); font-size: 12.5px; }
+.step .live-note { margin-top: 8px; font-size: 12px; color: var(--text-primary); }
+.empty { color: var(--text-muted); padding: 24px 0; text-align: center; }
+.events li { margin-bottom: 6px; }
+.events { padding-left: 18px; margin: 6px 0 0; font-size: 12.5px; color: var(--text-secondary); max-height: 260px; overflow: auto; }
+.toggle { margin-left: auto; background: none; border: 1px solid var(--border); color: var(--text-secondary); border-radius: 6px; padding: 3px 8px; cursor: pointer; font: inherit; font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>✂️ ClaudeCut Live</h1>
+    <span id="conn" class="pill live">connecting…</span>
+    <span id="meta" class="sub"></span>
+    <button class="toggle" id="theme" type="button">Theme</button>
+  </header>
+
+  <section class="tiles">
+    <div class="card tile"><div class="label">Session cost (actual)</div><div class="value" id="tCost">$0.00</div><div class="note" id="tCostNote">from Anthropic's real usage numbers</div></div>
+    <div class="card tile"><div class="label">Saved by prompt caching</div><div class="value" id="tCache">$0.00</div><div class="note" id="tCacheNote">vs. paying full price for every input token</div></div>
+    <div class="card tile"><div class="label">Trimmed by ClaudeCut</div><div class="value" id="tTrim">0</div><div class="note" id="tTrimNote">tokens of noisy tool output removed</div></div>
+    <div class="card tile"><div class="label">Cache hit rate</div><div class="value" id="tHit">–</div><div class="note">share of input tokens read from cache</div></div>
+    <div class="card tile"><div class="label">Budget</div><div class="value" id="tBudget">no limit</div><div class="meter"><div id="tBudgetBar"></div></div><div class="note" id="tBudgetNote">start with --budget 5 to set one</div></div>
+  </section>
+
+  <section class="steps">
+    <div class="card step"><div class="n">STEP 1 · INTERCEPT</div><h2>Claude Code → ClaudeCut</h2><p>Claude Code sends every API call to this local proxy instead of straight to Anthropic.</p><div class="live-note" id="s1">Waiting for the first request…</div></div>
+    <div class="card step"><div class="n">STEP 2 · TRIM</div><h2>Compress noisy tool output</h2><p>Huge logs, test runs and search results are cut to head + tail + every error line. File reads are never touched.</p><div class="live-note" id="s2">Nothing trimmed yet.</div></div>
+    <div class="card step"><div class="n">STEP 3 · CACHE</div><h2>Keep the prompt cache hitting</h2><p>Adds cache breakpoints only when the client has none, and never edits history, so cached tokens cost ~90% less.</p><div class="live-note" id="s3">–</div></div>
+    <div class="card step"><div class="n">STEP 4 · MEASURE</div><h2>Real usage from Anthropic</h2><p>Reads the usage Anthropic reports on each response and prices it per model. Nothing leaves your machine.</p><div class="live-note" id="s4">–</div></div>
+  </section>
+
+  <section class="grid2">
+    <div class="card">
+      <h2>Tokens per request</h2>
+      <div class="sub">Each bar is one API call. Blue is the cheap part.</div>
+      <div class="legend">
+        <span><i style="background:var(--s1)"></i>Cache read (~10% price)</span>
+        <span><i style="background:var(--s2)"></i>Cache write (125%)</span>
+        <span><i style="background:var(--s3)"></i>Uncached input (100%)</span>
+        <span><i style="background:var(--s4)"></i>Output</span>
+      </div>
+      <div id="chart"><div class="empty">No requests yet. Use Claude Code and watch this fill in.</div></div>
+    </div>
+    <div class="card">
+      <h2>What's filling the context</h2>
+      <div class="sub" id="ctxSub">Biggest tool results in the latest request</div>
+      <div id="ctx"><div class="empty">–</div></div>
+    </div>
+  </section>
+
+  <section class="grid2">
+    <div class="card">
+      <h2>Requests</h2>
+      <div class="scroll"><table>
+        <thead><tr><th>Time</th><th>Model</th><th class="num">Cache read</th><th class="num">Write</th><th class="num">Uncached</th><th class="num">Output</th><th class="num">Cost</th><th class="num">Trimmed</th><th>Status</th></tr></thead>
+        <tbody id="rows"><tr><td colspan="9" class="empty">–</td></tr></tbody>
+      </table></div>
+    </div>
+    <div class="card">
+      <h2>What ClaudeCut did</h2>
+      <ul class="events" id="events"><li>Nothing yet.</li></ul>
+    </div>
+  </section>
+</div>
+
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var S = null;
+
+  try { var saved = localStorage.getItem('cc-theme'); if (saved) document.documentElement.setAttribute('data-theme', saved); } catch (e) {}
+  $('theme').onclick = function () {
+    var cur = document.documentElement.getAttribute('data-theme') ||
+      (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    var next = cur === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    try { localStorage.setItem('cc-theme', next); } catch (e) {}
+  };
+
+  function money(v) { if (v == null) return '–'; return v >= 100 ? '$' + v.toFixed(0) : v >= 1 ? '$' + v.toFixed(2) : '$' + v.toFixed(v === 0 ? 2 : 4); }
+  function num(n) { n = n || 0; return n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e4 ? (n / 1e3).toFixed(0) + 'k' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(n); }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  function time(t) { var d = new Date(t); return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }); }
+  function shortModel(m) { return String(m || '').replace(/^claude-/, ''); }
+
+  function render() {
+    if (!S) return;
+    var T = S.totals, reqs = S.requests.filter(function (r) { return !r.blocked; });
+    $('meta').textContent = S.project + ' · ' + (S.mode === 'measure' ? 'measure-only mode (no changes made)' : 'optimizing') + ' · started ' + time(S.startedAt);
+
+    $('tCost').textContent = money(T.cost);
+    $('tCostNote').textContent = T.unpriced ? T.unpriced + ' request(s) on a model without a known price' : 'without caching it would be ' + money(T.costNoCache);
+    $('tCache').textContent = money(T.cacheSavings);
+    $('tCacheNote').textContent = T.costNoCache > 0 ? Math.round(100 * T.cacheSavings / T.costNoCache) + '% less than paying full price for input' : 'vs. paying full price for every input token';
+    $('tTrim').textContent = num(T.trimmedTokens);
+    $('tTrimNote').textContent = T.compressedOutputs + ' tool outputs compressed · ≈ ' + money(T.trimmedSavings) + ' saved';
+    var totalIn = T.input + T.cacheRead + T.cacheWrite;
+    $('tHit').textContent = totalIn ? Math.round(100 * T.cacheRead / totalIn) + '%' : '–';
+    if (S.budget != null) {
+      var pct = Math.min(100, 100 * T.cost / S.budget);
+      $('tBudget').textContent = money(T.cost) + ' / $' + S.budget;
+      $('tBudgetBar').style.width = pct + '%';
+      $('tBudgetBar').style.background = pct >= 100 ? 'var(--bad)' : pct >= 80 ? 'var(--warn)' : 'var(--accent)';
+      $('tBudgetNote').textContent = pct >= 100 ? '⛔ Limit reached: new requests are blocked' : pct >= 80 ? '⚠ Over 80% of budget used' : Math.round(pct) + '% used';
+    }
+
+    var last = S.requests[S.requests.length - 1];
+    if (last) {
+      $('s1').innerHTML = '<b>' + T.requests + '</b> API calls intercepted · last: ' + esc(shortModel(last.model)) + ', ' + (last.ms / 1000).toFixed(1) + 's';
+      $('s2').innerHTML = T.compressedOutputs ? '<b>' + T.compressedOutputs + '</b> outputs compressed, <b>' + num(T.trimmedTokens) + '</b> tokens removed' : 'No oversized tool output yet. Small outputs pass through untouched.';
+      var bp = last.breakpoints;
+      $('s3').innerHTML = !bp ? '–' : bp.mode === 'client-managed' ? 'Client set ' + bp.existing + ' breakpoint(s) itself. ClaudeCut left them alone (API max is 4).'
+        : bp.mode === 'added-by-claudecut' ? 'Added <b>' + bp.added + '</b> cache breakpoint(s).' : bp.mode === 'measure-only' ? 'Measure-only: no changes made.' : 'No breakpoint needed.';
+      $('s4').innerHTML = 'Cache hit rate <b>' + (totalIn ? Math.round(100 * T.cacheRead / totalIn) + '%' : '–') + '</b> · ' + (T.errors ? '<span class="err">' + T.errors + ' error(s)</span>' : '<span class="ok">no errors</span>');
+    }
+
+    renderChart(reqs.slice(-60));
+    renderContext(S.lastContext);
+    renderRows(S.requests.slice(-40).reverse());
+    renderEvents(S.requests.slice(-60).reverse());
+  }
+
+  var SERIES = [['cacheRead', 'Cache read', '--s1'], ['cacheWrite', 'Cache write', '--s2'], ['input', 'Uncached input', '--s3'], ['output', 'Output', '--s4']];
+
+  function renderChart(reqs) {
+    var host = $('chart');
+    if (!reqs.length) return;
+    var W = Math.max(320, host.clientWidth), H = 240, padL = 44, padB = 18, padT = 8;
+    var max = Math.max.apply(null, reqs.map(function (r) { return r.cacheRead + r.cacheWrite + r.input + r.output; })) || 1;
+    var nice = Math.pow(10, Math.floor(Math.log10(max))); max = Math.ceil(max / nice) * nice;
+    var n = reqs.length, slot = (W - padL) / Math.max(n, 12), bw = Math.max(3, Math.min(28, slot - 3));
+    var y = function (v) { return padT + (H - padT - padB) * (1 - v / max); };
+    var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Stacked tokens per request">';
+    for (var g = 0; g <= 4; g++) {
+      var gv = max * g / 4, gy = y(gv);
+      svg += '<line x1="' + padL + '" x2="' + W + '" y1="' + gy + '" y2="' + gy + '" stroke="var(--grid)"/>';
+      svg += '<text x="' + (padL - 6) + '" y="' + (gy + 4) + '" text-anchor="end" font-size="10" fill="var(--text-muted)">' + num(gv) + '</text>';
+    }
+    reqs.forEach(function (r, i) {
+      var x = padL + i * slot + (slot - bw) / 2, acc = 0, segs = [];
+      SERIES.forEach(function (s) { var v = r[s[0]] || 0; if (v > 0) segs.push([acc, acc + v, s[2]]); acc += v; });
+      segs.forEach(function (sg, k) {
+        var top = y(sg[1]), bot = y(sg[0]) - (k > 0 ? 2 : 0), h = Math.max(0, bot - top);
+        var isTop = k === segs.length - 1, rad = isTop ? Math.min(4, bw / 2, h) : 0;
+        if (h <= 0) return;
+        if (rad) svg += '<path d="M' + x + ',' + (top + h) + 'V' + (top + rad) + 'Q' + x + ',' + top + ' ' + (x + rad) + ',' + top + 'H' + (x + bw - rad) + 'Q' + (x + bw) + ',' + top + ' ' + (x + bw) + ',' + (top + rad) + 'V' + (top + h) + 'Z" fill="var(' + sg[2] + ')"/>';
+        else svg += '<rect x="' + x + '" y="' + top + '" width="' + bw + '" height="' + h + '" fill="var(' + sg[2] + ')"/>';
+      });
+      if (r.status >= 400) svg += '<text x="' + (x + bw / 2) + '" y="' + (H - padB - 4) + '" text-anchor="middle" font-size="11" fill="var(--bad)">✕</text>';
+      svg += '<rect class="hit" data-i="' + i + '" x="' + (padL + i * slot) + '" y="0" width="' + slot + '" height="' + H + '" fill="transparent"/>';
+    });
+    svg += '<line x1="' + padL + '" x2="' + W + '" y1="' + (H - padB) + '" y2="' + (H - padB) + '" stroke="var(--border)"/>';
+    svg += '</svg><div class="tip" id="tip"></div>';
+    host.innerHTML = svg;
+    var tip = $('tip');
+    host.querySelectorAll('.hit').forEach(function (el) {
+      el.addEventListener('mousemove', function (ev) {
+        var r = reqs[+el.getAttribute('data-i')], box = host.getBoundingClientRect();
+        var html = '<div><b>' + esc(shortModel(r.model)) + '</b> · ' + time(r.t) + '</div>';
+        SERIES.forEach(function (s) { html += '<div class="row"><span><i style="background:var(' + s[2] + ')"></i>' + s[1] + '</span><b>' + (r[s[0]] || 0).toLocaleString() + '</b></div>'; });
+        html += '<div class="row"><span>Cost</span><b>' + money(r.cost) + '</b></div>';
+        if (r.trimmedTokens) html += '<div class="row"><span>Trimmed</span><b>' + r.trimmedTokens.toLocaleString() + '</b></div>';
+        if (r.error) html += '<div class="err">' + esc(r.error).slice(0, 120) + '</div>';
+        tip.innerHTML = html; tip.style.display = 'block';
+        var left = ev.clientX - box.left + 12; if (left + tip.offsetWidth > box.width) left = ev.clientX - box.left - tip.offsetWidth - 12;
+        tip.style.left = Math.max(0, left) + 'px'; tip.style.top = Math.max(0, ev.clientY - box.top - 20) + 'px';
+      });
+      el.addEventListener('mouseleave', function () { tip.style.display = 'none'; });
+    });
+  }
+
+  function renderContext(c) {
+    if (!c) return;
+    var parts = [['System prompt', c.systemChars], ['Tool definitions', c.toolsChars], ['Conversation text', c.messageChars], ['Tool results', c.toolResultChars]];
+    var total = parts.reduce(function (n, p) { return n + p[1]; }, 0) || 1;
+    $('ctxSub').textContent = 'Latest request: ≈' + num(Math.round(total / 4)) + ' tokens across ' + c.messages + ' messages';
+    var html = '<table><tbody>';
+    parts.forEach(function (p) { html += '<tr><td>' + p[0] + '</td><td class="num">≈' + num(Math.round(p[1] / 4)) + '</td><td style="width:40%"><div class="bar" style="width:' + (100 * p[1] / total).toFixed(1) + '%"></div></td></tr>'; });
+    html += '</tbody></table><h2 style="margin-top:14px">Biggest tool results</h2>';
+    if (!c.hogs || !c.hogs.length) html += '<div class="empty">No tool results in context yet.</div>';
+    else {
+      var top = c.hogs[0].tokens || 1;
+      html += '<table><tbody>' + c.hogs.map(function (h) {
+        return '<tr><td><b>' + esc(h.tool) + '</b><div class="mono">' + esc(h.detail) + '</div><div class="bar" style="width:' + (100 * h.tokens / top).toFixed(1) + '%"></div></td><td class="num">≈' + num(h.tokens) + '</td></tr>';
+      }).join('') + '</tbody></table>';
+    }
+    $('ctx').innerHTML = html;
+  }
+
+  function renderRows(rows) {
+    if (!rows.length) return;
+    $('rows').innerHTML = rows.map(function (r) {
+      var st = r.blocked ? '<span class="err">⛔ budget</span>' : r.status >= 400 ? '<span class="err" title="' + esc(r.error) + '">✕ ' + r.status + '</span>' : '<span class="ok">✓ ' + r.status + '</span>';
+      return '<tr><td>' + time(r.t) + '</td><td>' + esc(shortModel(r.model)) + '</td><td class="num">' + num(r.cacheRead) + '</td><td class="num">' + num(r.cacheWrite) + '</td><td class="num">' + num(r.input) + '</td><td class="num">' + num(r.output) + '</td><td class="num">' + money(r.cost) + '</td><td class="num">' + (r.trimmedTokens ? num(r.trimmedTokens) : '–') + '</td><td>' + st + '</td></tr>';
+    }).join('');
+  }
+
+  function renderEvents(rows) {
+    var items = [];
+    rows.forEach(function (r) {
+      if (r.blocked) items.push('<li class="err">' + time(r.t) + ' · Blocked a request: budget reached.</li>');
+      else if (r.status >= 400) items.push('<li class="err">' + time(r.t) + ' · API error ' + r.status + ': ' + esc(r.error || '').slice(0, 160) + '</li>');
+      (r.status < 400 ? r.compressed || [] : []).forEach(function (c) {
+        items.push('<li>' + time(r.t) + ' · Compressed <b>' + esc(c.tool) + '</b> output <span class="mono">' + esc(c.detail).slice(0, 70) + '</span>: ≈' + num(Math.round(c.charsBefore / 4)) + ' → ≈' + num(Math.round(c.charsAfter / 4)) + ' tokens</li>');
+      });
+      if (r.breakpoints && r.breakpoints.added) items.push('<li>' + time(r.t) + ' · Added ' + r.breakpoints.added + ' cache breakpoint(s).</li>');
+    });
+    $('events').innerHTML = items.length ? items.slice(0, 80).join('') : '<li>Nothing needed yet. Requests are passing through cleanly.</li>';
+  }
+
+  function connect() {
+    var es = new EventSource('/__claudecut/events');
+    es.onopen = function () { $('conn').textContent = 'live'; $('conn').className = 'pill live'; };
+    es.onmessage = function (e) { var m = JSON.parse(e.data); S = m.snapshot; render(); };
+    es.onerror = function () { $('conn').textContent = 'disconnected (session ended?)'; $('conn').className = 'pill live off'; };
+  }
+  window.addEventListener('resize', function () { if (S) renderChart(S.requests.filter(function (r) { return !r.blocked; }).slice(-60)); });
+  connect();
+})();
+</script>
+</body>
+</html>

@@ -22,9 +22,9 @@ class Settings(BaseSettings):
     # Automatic Model Switching & Routing
     # Options: 'auto' (dynamic full tiering), 'conservative' (only downscales simple tasks to Haiku), 'disabled'
     ROUTING_MODE: str = "auto"
-    LIGHT_TIER_MODEL: str = "claude-3-5-haiku-20241022"
-    STANDARD_TIER_MODEL: str = "claude-3-7-sonnet-20250219"
-    HEAVY_TIER_MODEL: str = "claude-3-opus-20240229"
+    LIGHT_TIER_MODEL: str = "claude-haiku-5-5"
+    STANDARD_TIER_MODEL: str = "claude-sonnet-5-5"
+    HEAVY_TIER_MODEL: str = "claude-opus-5-5"
     
     # Storage
     DATABASE_PATH: str = "claudecut_analytics.db"

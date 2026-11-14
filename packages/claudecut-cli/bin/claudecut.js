@@ -1,127 +1,201 @@
 #!/usr/bin/env node
-
-const { spawn } = require('child_process');
+const { spawn, execFileSync } = require('child_process');
+const fs = require('fs');
+const path = require('path');
 const { ClaudeCutProxy } = require('../src/proxy');
-const { ensureClaudeIgnore } = require('../src/ignoreManager');
+const { loadSessions } = require('../src/ledger');
+const { scan, applyRules } = require('../src/init');
+const pkg = require('../package.json');
 
-async function main() {
-  const args = process.argv.slice(2);
+const c = {
+  green: s => `\x1b[32m${s}\x1b[0m`, cyan: s => `\x1b[36m${s}\x1b[0m`, yellow: s => `\x1b[33m${s}\x1b[0m`,
+  red: s => `\x1b[31m${s}\x1b[0m`, dim: s => `\x1b[90m${s}\x1b[0m`, bold: s => `\x1b[1m${s}\x1b[0m`
+};
 
-  // Help command
-  if (args.includes('--help') || args.includes('-h')) {
-    console.log(`
-✂️  ClaudeCut - Zero-Setup Optimizer for Claude Code (NPX Ready)
+const HELP = `
+✂️  ClaudeCut v${pkg.version}: see and cut what Claude Code costs
 
 Usage:
-  npx claudecut [options] [claude-args]
-
-What it automatically does for you:
-  1. Auto-configures .claudeignore to protect large projects from lockfile & build context bloat
-  2. Runs a lightweight local proxy that attaches 90% off ephemeral prompt caching
-  3. Minifies whitespace and repetitive token bloat
-  4. Keeps Claude Code fast and inexpensive on massive repos
+  claudecut [options] [claude args]   Run Claude Code through ClaudeCut (default)
+  claudecut proxy [options]           Only run the proxy (for SDK apps, Cursor, etc.)
+  claudecut init [--yes]              Shield a big repo: keep lockfiles/build output out of context
+  claudecut report                    Cost summary of your recent sessions
 
 Options:
-  --port <num>       Custom proxy port (default: 9876)
-  --no-ignore        Skip auto-creating .claudeignore
-  -v, --version      Show ClaudeCut version
-  -h, --help         Show this help message
+  --budget <usd>     Block new requests once this session has spent this much
+  --measure-only     Change nothing; just measure and show what ClaudeCut would do
+  --port <num>       Preferred proxy port (default 9876; next free port is used if busy)
+  --upstream <url>   Forward to this API base URL (default: $ANTHROPIC_BASE_URL or Anthropic)
+  --no-open          Don't open the live dashboard in the browser
+  -v, --version      Show version
+  -h, --help         Show this help
 
 Examples:
-  npx claudecut
-  npx claudecut --resume
-  npx claudecut "Fix the issue in auth service"
-`);
-    process.exit(0);
-  }
+  claudecut
+  claudecut --budget 5
+  claudecut --resume
+  claudecut "fix the failing auth tests"
+`;
 
-  if (args.includes('--version') || args.includes('-v')) {
-    const pkg = require('../package.json');
-    console.log(`ClaudeCut v${pkg.version}`);
-    process.exit(0);
-  }
+function takeOption(args, name, hasValue = true) {
+  const i = args.indexOf(name);
+  if (i === -1) return undefined;
+  const v = hasValue ? args[i + 1] : true;
+  args.splice(i, hasValue ? 2 : 1);
+  return v;
+}
 
-  // Parse options
-  let port = 9876;
-  const portIdx = args.indexOf('--port');
-  if (portIdx !== -1 && args[portIdx + 1]) {
-    port = parseInt(args[portIdx + 1], 10) || 9876;
-    args.splice(portIdx, 2);
-  }
-
-  const noIgnore = args.includes('--no-ignore');
-  if (noIgnore) {
-    args.splice(args.indexOf('--no-ignore'), 1);
-  } else {
-    const ignoreResult = ensureClaudeIgnore(process.cwd());
-    if (ignoreResult.created) {
-      console.log(`\x1b[32m✔ Auto-configured .claudeignore (shielded lockfiles & dist from context)\x1b[0m`);
-    }
-  }
-
-  // Start background optimizer proxy
-  const proxy = new ClaudeCutProxy({ port });
-  let proxyUrl;
+function openBrowser(url) {
   try {
-    proxyUrl = await proxy.start();
-    console.log(`\x1b[36m✂️  ClaudeCut Optimizer Active on ${proxyUrl} (Prompt Caching 90% Off Enabled)\x1b[0m`);
-  } catch (err) {
-    console.warn(`\x1b[33m[Warning] Could not start proxy on port ${port} (${err.message}). Launching standard Claude...\x1b[0m`);
+    if (process.platform === 'win32') spawn('cmd.exe', ['/d', '/c', 'start', '""', url], { detached: true, stdio: 'ignore' }).unref();
+    else spawn(process.platform === 'darwin' ? 'open' : 'xdg-open', [url], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
+  } catch {}
+}
+
+/** Locate the Claude Code executable. Returns {cmd, args, shell} for spawn. */
+function resolveClaude() {
+  if (process.env.CLAUDECUT_CLAUDE_BIN) return { cmd: process.env.CLAUDECUT_CLAUDE_BIN, viaCmd: /\.(cmd|bat)$/i.test(process.env.CLAUDECUT_CLAUDE_BIN) };
+  if (process.platform !== 'win32') return { cmd: 'claude', viaCmd: false };
+  try {
+    const hits = execFileSync('where.exe', ['claude'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    const exe = hits.find(h => /\.exe$/i.test(h));
+    if (exe) return { cmd: exe, viaCmd: false };
+    const cmd = hits.find(h => /\.(cmd|bat)$/i.test(h));
+    if (cmd) return { cmd, viaCmd: true };
+  } catch {}
+  return null;
+}
+
+function quoteWin(a) {
+  if (a === '') return '""';
+  return /[\s"&|<>^()%!]/.test(a) ? `"${a.replace(/"/g, '""')}"` : a;
+}
+
+function printSummary(proxy) {
+  const T = proxy.stats;
+  if (!T.requests) return;
+  const money = v => '$' + v.toFixed(v >= 1 ? 2 : 4);
+  const totalIn = T.input + T.cacheRead + T.cacheWrite;
+  console.log('\n' + c.bold('✂️  ClaudeCut session summary'));
+  console.log(`   API calls:          ${T.requests}${T.errors ? c.red(`  (${T.errors} errors)`) : ''}`);
+  console.log(`   Actual cost:        ${money(T.cost)}${T.unpriced ? c.dim(`  (+${T.unpriced} calls on unknown-price models)`) : ''}`);
+  console.log(`   Saved by caching:   ${c.green(money(T.cacheSavings))}  (cache hit rate ${totalIn ? Math.round(100 * T.cacheRead / totalIn) : 0}%)`);
+  console.log(`   Trimmed by ClaudeCut: ${T.trimmedTokens.toLocaleString()} tokens from ${T.compressedOutputs} tool outputs (≈ ${c.green(money(T.trimmedSavings))})`);
+  if (T.blockedByBudget) console.log(c.yellow(`   ${T.blockedByBudget} request(s) blocked by your budget`));
+  console.log(c.dim('   Details: claudecut report'));
+}
+
+async function startProxy(args, label) {
+  const budgetArg = takeOption(args, '--budget');
+  const budget = budgetArg !== undefined ? Number(budgetArg) : null;
+  if (budgetArg !== undefined && !(budget > 0)) { console.error(c.red('--budget needs a positive number of dollars, e.g. --budget 5')); process.exit(1); }
+  const port = parseInt(takeOption(args, '--port') || '9876', 10) || 9876;
+  const measure = !!takeOption(args, '--measure-only', false);
+  const noOpen = !!takeOption(args, '--no-open', false);
+  const explicitUpstream = takeOption(args, '--upstream');
+  let upstream = explicitUpstream || process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com';
+  if (!explicitUpstream && /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?\/?$/.test(upstream)) {
+    // A previous ClaudeCut session may have left ANTHROPIC_BASE_URL pointing at a local proxy;
+    // forwarding to it would loop. Use --upstream explicitly to chain local gateways.
+    upstream = 'https://api.anthropic.com';
   }
 
-  // Setup environment for Claude Code CLI
-  const env = { ...process.env };
-  if (proxyUrl) {
-    env.ANTHROPIC_BASE_URL = proxyUrl;
+  const proxy = new ClaudeCutProxy({ port, budget, upstream, mode: measure ? 'measure' : 'optimize' });
+  await proxy.start();
+  console.log(c.cyan(`✂️  ClaudeCut ${measure ? '(measure-only) ' : ''}running on ${proxy.url} → ${new URL(upstream).origin}`));
+  console.log(`   Live dashboard: ${c.bold(proxy.dashboardUrl)}${budget ? `   Budget: $${budget}` : ''}`);
+  if (!noOpen) openBrowser(proxy.dashboardUrl);
+  return proxy;
+}
+
+async function cmdRun(args) {
+  const claude = resolveClaude();
+  if (!claude) {
+    console.error(c.red('Claude Code was not found on your PATH.'));
+    console.log('Install it first: ' + c.yellow('npm install -g @anthropic-ai/claude-code'));
+    process.exit(1);
   }
+  const proxy = await startProxy(args);
+  console.log(c.dim('   Launching Claude Code…\n'));
 
-  console.log(`\x1b[90mLaunching Claude Code...\x1b[0m\n`);
-
-  // Detect executable command
-  // On Windows, claude can be installed as claude.exe (winget/native) or claude.cmd (npm global)
-  // Invoking 'claude' directly inside shell: true lets Windows resolve .exe, .cmd, or .bat automatically
-  const claudeCmd = 'claude';
-
-  // Spawn claude with user arguments and stdio inheritance
-  const child = spawn(claudeCmd, args, {
-    env,
-    stdio: 'inherit',
-    shell: true
-  });
+  const env = { ...process.env, ANTHROPIC_BASE_URL: proxy.url };
+  const child = claude.viaCmd
+    ? spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', [quoteWin(claude.cmd), ...args.map(quoteWin)].join(' ')], { env, stdio: 'inherit', windowsVerbatimArguments: true })
+    : spawn(claude.cmd, args, { env, stdio: 'inherit' });
 
   child.on('error', err => {
-    if (err.code === 'ENOENT') {
-      console.error(`\x1b[31m[Error] Claude Code is not installed.\x1b[0m`);
-      console.log(`Please install Claude Code first by running:`);
-      console.log(`\x1b[33mnpm install -g @anthropic-ai/claude-code\x1b[0m`);
-    } else {
-      console.error(`Failed to launch Claude Code:`, err.message);
-    }
+    console.error(c.red(`Failed to launch Claude Code: ${err.message}`));
     proxy.stop();
     process.exit(1);
   });
-
   child.on('exit', code => {
+    printSummary(proxy);
     proxy.stop();
-    if (proxy.stats.totalRequests > 0) {
-      console.log(`\n\x1b[32m✂️  ClaudeCut Session Finished. Handled ${proxy.stats.totalRequests} API calls with automated caching optimization.\x1b[0m`);
-    }
     process.exit(code || 0);
   });
+  // Ctrl+C goes to Claude Code (same console); we just keep running until it exits.
+  process.on('SIGINT', () => {});
+}
 
-  // Handle clean exit on Ctrl+C / SIGINT
-  process.on('SIGINT', () => {
-    proxy.stop();
-    child.kill('SIGINT');
-  });
+async function cmdProxy(args) {
+  const proxy = await startProxy(args);
+  console.log('\nPoint your app at it:');
+  console.log(c.dim(process.platform === 'win32' ? `   $env:ANTHROPIC_BASE_URL="${proxy.url}"   (PowerShell)` : `   export ANTHROPIC_BASE_URL=${proxy.url}`));
+  console.log(c.dim('   Press Ctrl+C to stop.'));
+  const stop = () => { printSummary(proxy); proxy.stop(); process.exit(0); };
+  process.on('SIGINT', stop);
+  process.on('SIGTERM', stop);
+}
 
-  process.on('SIGTERM', () => {
-    proxy.stop();
-    child.kill('SIGTERM');
-  });
+function fmtBytes(b) { return b > 1e6 ? (b / 1e6).toFixed(1) + ' MB' : b > 1e3 ? (b / 1e3).toFixed(0) + ' KB' : b + ' B'; }
+
+function cmdInit(args) {
+  const root = process.cwd();
+  const yes = args.includes('--yes') || args.includes('-y');
+  const { projects, rules, findings } = scan(root);
+  console.log(c.bold(`✂️  Scanning ${root}`));
+  console.log(`   Projects found: ${projects.length}${projects.length > 1 ? c.dim(' (' + projects.slice(1, 6).join(', ') + (projects.length > 6 ? ', …' : '') + ')') : ''}`);
+  if (findings.length) {
+    console.log('   Bulky paths Claude Code should never read:');
+    findings.sort((a, b) => b.bytes - a.bytes).slice(0, 15).forEach(f => console.log(`     ${f.path.padEnd(48)} ${c.dim(fmtBytes(f.bytes))}`));
+    if (findings.length > 15) console.log(c.dim(`     …and ${findings.length - 15} more`));
+  } else console.log(c.dim('   No dependency folders or lockfiles found (generic rules for minified files/logs will still be added).'));
+
+  const target = path.join(root, '.claude', 'settings.json');
+  if (!yes) {
+    console.log(`\n   This will add ${rules.length} deny rules to ${c.bold(target)} (existing settings are kept).`);
+    console.log(`   Run ${c.cyan('claudecut init --yes')} to apply.`);
+    return;
+  }
+  const { file, added } = applyRules(root, rules);
+  console.log(added.length ? c.green(`\n✔ Added ${added.length} rules to ${file}`) : c.green('\n✔ Already shielded: nothing to add.'));
+}
+
+function cmdReport() {
+  const sessions = loadSessions(20);
+  if (!sessions.length) return console.log('No sessions recorded yet. Run ' + c.cyan('claudecut') + ' first.');
+  const money = v => ('$' + v.toFixed(2)).padStart(9);
+  console.log(c.bold('Session'.padEnd(26) + 'Calls'.padStart(7) + 'Cost'.padStart(9) + 'Cached'.padStart(9) + 'Trimmed'.padStart(9)));
+  let tot = { cost: 0, cache: 0, trim: 0 };
+  for (const s of sessions) {
+    console.log(s.id.slice(0, 19).replace('T', ' ').padEnd(26) + String(s.requests).padStart(7) + money(s.cost) + money(s.cacheSavings) + money(s.trimmedSavings));
+    tot.cost += s.cost; tot.cache += s.cacheSavings; tot.trim += s.trimmedSavings;
+  }
+  console.log(c.bold('Total'.padEnd(33) + money(tot.cost) + money(tot.cache) + money(tot.trim)));
+  console.log(c.dim('"Cached" = saved by prompt caching. "Trimmed" = saved by ClaudeCut output compression (estimate).'));
+}
+
+async function main() {
+  const args = process.argv.slice(2);
+  if (args[0] === '--help' || args[0] === '-h' || args[0] === 'help') return console.log(HELP);
+  if (args[0] === '--version' || args[0] === '-v') return console.log(`ClaudeCut v${pkg.version}`);
+  if (args[0] === 'init') return cmdInit(args.slice(1));
+  if (args[0] === 'report') return cmdReport();
+  if (args[0] === 'proxy') return cmdProxy(args.slice(1));
+  return cmdRun(args);
 }
 
 main().catch(err => {
-  console.error('[Error]', err);
+  console.error(c.red('[ClaudeCut] ' + (err && err.message ? err.message : err)));
   process.exit(1);
 });

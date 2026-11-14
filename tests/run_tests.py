@@ -17,7 +17,7 @@ class TestClaudeCutOptimizer(unittest.TestCase):
 
     def test_cache_injector_system_and_tools(self):
         payload = {
-            "model": "claude-3-7-sonnet-20250219",
+            "model": "claude-sonnet-5-5",
             "system": "You are a very helpful assistant with a large context prompt... " * 30,
             "tools": [
                 {"name": "tool_a", "description": "Does A", "input_schema": {}},
@@ -39,7 +39,7 @@ class TestClaudeCutOptimizer(unittest.TestCase):
     def test_dynamic_model_routing(self):
         # 1. Lightweight task -> Routes to Haiku
         light_payload = {
-            "model": "claude-3-7-sonnet-20250219",
+            "model": "claude-sonnet-5-5",
             "messages": [{"role": "user", "content": "generate a git commit message for adding auth"}]
         }
         tier, _ = classify_task_complexity(light_payload)
@@ -49,7 +49,7 @@ class TestClaudeCutOptimizer(unittest.TestCase):
 
         # 2. Heavy / Complex reasoning task -> Routes to Opus
         heavy_payload = {
-            "model": "claude-3-7-sonnet-20250219",
+            "model": "claude-sonnet-5-5",
             "messages": [{"role": "user", "content": "Perform a deep security audit and mathematical proof of this distributed consensus protocol"}]
         }
         tier, _ = classify_task_complexity(heavy_payload)
@@ -59,7 +59,7 @@ class TestClaudeCutOptimizer(unittest.TestCase):
 
         # 3. Standard coding task with tools -> Retains Sonnet
         standard_payload = {
-            "model": "claude-3-7-sonnet-20250219",
+            "model": "claude-sonnet-5-5",
             "tools": [{"name": "read_file", "description": "reads file", "input_schema": {}}],
             "messages": [{"role": "user", "content": "Refactor the authentication handler to use JWT tokens"}]
         }
@@ -79,14 +79,14 @@ class TestClaudeCutOptimizer(unittest.TestCase):
                 "cache_read_input_tokens": 50000,
                 "cache_creation_input_tokens": 0
             }
-            result = tracker.record_usage("claude-3-7-sonnet", usage, requested_model="claude-3-7-sonnet")
+            result = tracker.record_usage("claude-sonnet-4-6", usage, requested_model="claude-sonnet-4-6")
             self.assertGreater(result["savings_percent"], 70.0)
             self.assertGreater(result["saved_usd"], 0.10)
             
             stats = tracker.get_summary_stats()
             self.assertEqual(stats["total_requests"], 1)
             self.assertEqual(stats["cached_read_tokens"], 50000)
-            self.assertIn("claude-3-7-sonnet", stats["model_breakdown"])
+            self.assertIn("claude-sonnet-4-6", stats["model_breakdown"])
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
