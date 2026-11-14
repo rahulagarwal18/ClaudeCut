@@ -250,15 +250,20 @@ td.num, th.num { text-align: right; }
     if (!c) return;
     var parts = [['System prompt', c.systemChars], ['Tool definitions', c.toolsChars], ['Conversation text', c.messageChars], ['Tool results', c.toolResultChars]];
     var total = parts.reduce(function (n, p) { return n + p[1]; }, 0) || 1;
-    $('ctxSub').textContent = 'Latest request: ≈' + num(Math.round(total / 4)) + ' tokens across ' + c.messages + ' messages';
+    // Scale the chars/4 estimates so they add up to the real token count Anthropic reported.
+    var scale = c.realTokens ? c.realTokens / (total / 4) : 1;
+    var tok = function (chars) { return Math.round(chars / 4 * scale); };
+    $('ctxSub').textContent = c.realTokens
+      ? 'Latest request: ' + num(c.realTokens) + ' input tokens (exact, from Anthropic) across ' + c.messages + ' messages'
+      : 'Latest request: ≈' + num(tok(total)) + ' tokens (estimate) across ' + c.messages + ' messages';
     var html = '<table><tbody>';
-    parts.forEach(function (p) { html += '<tr><td>' + p[0] + '</td><td class="num">≈' + num(Math.round(p[1] / 4)) + '</td><td style="width:40%"><div class="bar" style="width:' + (100 * p[1] / total).toFixed(1) + '%"></div></td></tr>'; });
+    parts.forEach(function (p) { html += '<tr><td>' + p[0] + '</td><td class="num">≈' + num(tok(p[1])) + '</td><td style="width:40%"><div class="bar" style="width:' + (100 * p[1] / total).toFixed(1) + '%"></div></td></tr>'; });
     html += '</tbody></table><h2 style="margin-top:14px">Biggest tool results</h2>';
     if (!c.hogs || !c.hogs.length) html += '<div class="empty">No tool results in context yet.</div>';
     else {
       var top = c.hogs[0].tokens || 1;
       html += '<table><tbody>' + c.hogs.map(function (h) {
-        return '<tr><td><b>' + esc(h.tool) + '</b><div class="mono">' + esc(h.detail) + '</div><div class="bar" style="width:' + (100 * h.tokens / top).toFixed(1) + '%"></div></td><td class="num">≈' + num(h.tokens) + '</td></tr>';
+        return '<tr><td><b>' + esc(h.tool) + '</b><div class="mono">' + esc(h.detail) + '</div><div class="bar" style="width:' + (100 * h.tokens / top).toFixed(1) + '%"></div></td><td class="num">≈' + num(Math.round(h.tokens * scale)) + '</td></tr>';
       }).join('') + '</tbody></table>';
     }
     $('ctx').innerHTML = html;

@@ -20,6 +20,7 @@ Usage:
   claudecut proxy [options]           Only run the proxy (for SDK apps, Cursor, etc.)
   claudecut init [--yes]              Shield a big repo: keep lockfiles/build output out of context
   claudecut report                    Cost summary of your recent sessions
+  claudecut vscode [--remove]         Route the VS Code Claude Code panel through ClaudeCut (auto-starts)
 
 Options:
   --budget <usd>     Block new requests once this session has spent this much
@@ -100,8 +101,23 @@ async function startProxy(args, label) {
     upstream = 'https://api.anthropic.com';
   }
 
-  const proxy = new ClaudeCutProxy({ port, budget, upstream, mode: measure ? 'measure' : 'optimize' });
-  await proxy.start();
+  const strictPort = !!takeOption(args, '--strict-port', false);
+  const proxy = new ClaudeCutProxy({ port, budget, upstream, mode: measure ? 'measure' : 'optimize', strictPort });
+  try {
+    await proxy.start();
+  } catch (err) {
+    if (strictPort && err.code === 'EADDRINUSE') {
+      // Another VS Code window may already run ClaudeCut on this port: reuse it.
+      const alive = await fetch(`http://127.0.0.1:${port}/__claudecut/api/snapshot`).then(r => r.ok).catch(() => false);
+      if (alive) {
+        console.log(c.green(`✂️  ClaudeCut is already running on http://127.0.0.1:${port}. Dashboard: http://127.0.0.1:${port}/__claudecut`));
+        process.exit(0);
+      }
+      console.error(c.red(`Port ${port} is used by another program. Pick another one: claudecut vscode --port 9877`));
+      process.exit(1);
+    }
+    throw err;
+  }
   console.log(c.cyan(`✂️  ClaudeCut ${measure ? '(measure-only) ' : ''}running on ${proxy.url} → ${new URL(upstream).origin}`));
   console.log(`   Live dashboard: ${c.bold(proxy.dashboardUrl)}${budget ? `   Budget: $${budget}` : ''}`);
   if (!noOpen) openBrowser(proxy.dashboardUrl);
@@ -171,6 +187,34 @@ function cmdInit(args) {
   console.log(added.length ? c.green(`\n✔ Added ${added.length} rules to ${file}`) : c.green('\n✔ Already shielded: nothing to add.'));
 }
 
+function cmdVscode(args) {
+  const vscode = require('../src/vscode');
+  const root = process.cwd();
+  if (args.includes('--print')) {
+    return console.log(JSON.stringify(vscode.makeTask(9876, null), null, 2));
+  }
+  if (args.includes('--remove')) {
+    const changed = vscode.remove(root);
+    console.log(changed.length ? c.green('✔ Removed ClaudeCut from:\n   ' + changed.join('\n   ')) : 'Nothing to remove.');
+    console.log(c.dim('   Restart VS Code (or reload the window) so the Claude Code panel talks to Anthropic directly again.'));
+    return;
+  }
+  const port = parseInt(takeOption(args, '--port') || '9876', 10) || 9876;
+  const budgetArg = takeOption(args, '--budget');
+  const { tasksFile, settingsFile, url } = vscode.setup(root, { port, budget: budgetArg ? Number(budgetArg) : null });
+  console.log(c.green('✔ ClaudeCut is set up for VS Code in this folder'));
+  console.log(c.dim(`   ${tasksFile}\n   ${settingsFile}`));
+  console.log(`
+Next:
+  1. Reload VS Code:  Ctrl+Shift+P → "Developer: Reload Window"
+  2. If VS Code asks "Allow automatic tasks?", click ${c.bold('Allow')}
+     (or Ctrl+Shift+P → "Tasks: Manage Automatic Tasks" → Allow)
+  3. Use the Claude Code panel as usual
+  4. Dashboard: ${c.bold(url + '/__claudecut')}
+
+To undo: claudecut vscode --remove`);
+}
+
 function cmdReport() {
   const sessions = loadSessions(20);
   if (!sessions.length) return console.log('No sessions recorded yet. Run ' + c.cyan('claudecut') + ' first.');
@@ -191,6 +235,7 @@ async function main() {
   if (args[0] === '--version' || args[0] === '-v') return console.log(`ClaudeCut v${pkg.version}`);
   if (args[0] === 'init') return cmdInit(args.slice(1));
   if (args[0] === 'report') return cmdReport();
+  if (args[0] === 'vscode') return cmdVscode(args.slice(1));
   if (args[0] === 'proxy') return cmdProxy(args.slice(1));
   return cmdRun(args);
 }
