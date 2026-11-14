@@ -19,11 +19,17 @@
 
 ---
 
+> **Using Claude Code?** Use the zero-dependency Node CLI: `npx claudecut`. It runs Claude Code through ClaudeCut with a **live cost dashboard**, safe tool-output compression, a `--budget` guard and `claudecut init` for big repos and monorepos. See [packages/claudecut-cli](packages/claudecut-cli/README.md).
+>
+> The Python proxy below is for your own API apps. Its model auto-switching changes the model mid-conversation, which resets the prompt cache, so keep it off for Claude Code.
+
+---
+
 ## ⚡ The Problem: Why Are Claude Invoices So High?
 
 When using developer tools like **Claude Code CLI**, **Cursor**, **Continue.dev**, or building custom agentic workflows, your client re-sends the entire repository context, system instructions, tool schemas, and conversation history on **every single turn**.
 
-By default, Anthropic bills standard input tokens at full price (**$3.00/M on Sonnet**, **$15.00/M on Opus**). 
+By default, Anthropic bills standard input tokens at full price (**$2.00/M on Sonnet 5.5**, **$4.00/M on Opus 5.5**). 
 
 Even though Anthropic offers **Prompt Caching** (giving a massive **90% discount at $0.30/M**), over 90% of tools and developer setups do not structure or place cache breakpoints correctly—wasting hundreds of dollars every month.
 
@@ -77,8 +83,8 @@ Dynamically attaches up to 4 Anthropic `cache_control: {"type": "ephemeral"}` br
 
 ### 🧠 2. Dynamic Task-Based Model Switching
 Inspects prompt complexity in real time:
-* **Tier 1 (Lightweight / 90% Cheaper):** Git commit messages, regex, syntax checks, typo fixing, docstrings $\rightarrow$ automatically routed to **Claude 3.5 Haiku**.
-* **Tier 2 (Standard Workhorse):** Feature implementation, multi-file code editing, unit tests $\rightarrow$ **Claude 3.7 Sonnet**.
+* **Tier 1 (Lightweight / 90% Cheaper):** Git commit messages, regex, syntax checks, typo fixing, docstrings $\rightarrow$ automatically routed to **Claude Haiku 5.5**.
+* **Tier 2 (Standard Workhorse):** Feature implementation, multi-file code editing, unit tests $\rightarrow$ **Claude Sonnet 5.5**.
 * **Tier 3 (Deep Reasoning):** Architecture design, distributed consensus, security audits $\rightarrow$ **Claude Opus**.
 
 ### 🧹 3. Context & Whitespace Minification

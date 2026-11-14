@@ -34,3 +34,20 @@ jobs:
       - name: Run Test Suite
         run: |
           python -m unittest tests/run_tests.py
+
+  node-cli:
+    name: Node CLI tests (Node ${{ matrix.node-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node-version: ['18', '20', '22']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+      - name: Run tests
+        working-directory: packages/claudecut-cli
+        run: npm test

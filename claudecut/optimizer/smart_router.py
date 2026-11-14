@@ -94,9 +94,9 @@ def classify_task_complexity(payload: Dict[str, Any]) -> Tuple[str, str]:
 
 def route_model(
     payload: Dict[str, Any],
-    light_model: str = "claude-3-5-haiku-20241022",
-    standard_model: str = "claude-3-7-sonnet-20250219",
-    heavy_model: str = "claude-3-opus-20240229",
+    light_model: str = "claude-haiku-5-5",
+    standard_model: str = "claude-sonnet-5-5",
+    heavy_model: str = "claude-opus-5-5",
     routing_mode: str = "auto",  # 'auto', 'conservative', 'disabled'
     force_override: bool = False
 ) -> Tuple[str, str]:
